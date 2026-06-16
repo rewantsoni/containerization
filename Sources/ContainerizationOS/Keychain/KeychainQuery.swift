@@ -40,13 +40,15 @@ public struct KeychainQuery {
     ///   - hostname: The hostname for the authenticating server.
     ///   - username: The username to present to the server.
     ///   - password: The password to present to the server.
+    ///   - trustedApplicationPaths: Array of paths to applications that should have access to this keychain item.
     /// - Throws: An error if the keychain query fails or returns unexpected data.
     public func save(
         securityDomain: String,
         accessGroup: String? = nil,
         hostname: String,
         username: String,
-        password: String
+        password: String,
+        trustedApplicationPaths: [String] = []
     ) throws {
         if try exists(securityDomain: securityDomain, accessGroup: accessGroup, hostname: hostname) {
             try delete(securityDomain: securityDomain, accessGroup: accessGroup, hostname: hostname)
@@ -66,9 +68,11 @@ public struct KeychainQuery {
             kSecAttrSynchronizable as String: false,
         ]
         
-        // Add access control to allow related binaries
-        let access = try createAccessControl()
-        query[kSecAttrAccess as String] = access
+        // Add access control if trusted application paths are provided
+        if !trustedApplicationPaths.isEmpty {
+            let access = try createAccessControl(trustedApplicationPaths: trustedApplicationPaths)
+            query[kSecAttrAccess as String] = access
+        }
         
         if let accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
@@ -237,11 +241,11 @@ public struct KeychainQuery {
         return true
     }
     
-    /// Create access control that allows the current application and container-core-images to access keychain items.
-    /// Derives the container-core-images path from the current executable's path using relative path logic.
+    /// Create access control that allows specified applications to access keychain items.
+    /// - Parameter trustedApplicationPaths: Array of paths to applications that should have access.
     /// - Returns: A SecAccess object configured with the trusted applications.
     /// - Throws: An error if access control creation fails.
-    private func createAccessControl() throws -> SecAccess {
+    private func createAccessControl(trustedApplicationPaths: [String]) throws -> SecAccess {
         // Create an array of trusted applications
         var trustedApps: [SecTrustedApplication] = []
         
@@ -252,49 +256,12 @@ public struct KeychainQuery {
             trustedApps.append(app)
         }
         
-        // Derive container-core-images path from current executable
-        // For brew installations:
-        //   - Executable: /opt/homebrew/bin/container (symlink to ../Cellar/container/VERSION/bin/container)
-        //   - Real path: /opt/homebrew/Cellar/container/VERSION/bin/container
-        //   - Core images: /opt/homebrew/opt/container/libexec/container-plugins/container-core-images/bin/container-core-images
-        // For non-brew installations:
-        //   - Executable: /usr/local/bin/container
-        //   - Core images: /usr/local/libexec/container/plugins/container-core-images/bin/container-core-images
-        
-        if let executablePath = CommandLine.arguments.first {
-            // Resolve symlinks to get the real path
-            let realPath = (executablePath as NSString).resolvingSymlinksInPath
-            let executableURL = URL(fileURLWithPath: realPath)
-            let binDir = executableURL.deletingLastPathComponent()
-            
-            // For brew: bin is at /opt/homebrew/Cellar/container/VERSION/bin
-            // We need to go to /opt/homebrew/opt/container/libexec/container-plugins/...
-            // For non-brew: bin is at /usr/local/bin
-            // We need to go to /usr/local/libexec/container/plugins/...
-            
-            var candidatePaths: [String] = []
-            
-            // Check if this is a brew installation (contains /Cellar/)
-            if realPath.contains("/Cellar/container/") {
-                // Brew installation - navigate to opt directory
-                let prefix = binDir.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                let optPath = prefix.appendingPathComponent("opt/container/libexec/container-plugins/container-core-images/bin/container-core-images").path
-                candidatePaths.append(optPath)
-            } else {
-                // Non-brew installation
-                let prefix = binDir.deletingLastPathComponent()
-                let nonBrewPath = prefix.appendingPathComponent("libexec/container/plugins/container-core-images/bin/container-core-images").path
-                candidatePaths.append(nonBrewPath)
-            }
-            
-            // Try each candidate path
-            for path in candidatePaths {
-                var app: SecTrustedApplication?
-                let status = SecTrustedApplicationCreateFromPath(path, &app)
-                if status == errSecSuccess, let trustedApp = app {
-                    trustedApps.append(trustedApp)
-                    break // Only add the first one that succeeds
-                }
+        // Add each provided application path
+        for path in trustedApplicationPaths {
+            var app: SecTrustedApplication?
+            let status = SecTrustedApplicationCreateFromPath(path, &app)
+            if status == errSecSuccess, let trustedApp = app {
+                trustedApps.append(trustedApp)
             }
         }
         

@@ -22,14 +22,17 @@ import ContainerizationOS
 public struct KeychainHelper: Sendable {
     private let securityDomain: String
     private let accessGroup: String?
+    private let trustedApplicationPaths: [String]
 
     /// Create a new keychain helper.
     /// - Parameters:
     ///   - securityDomain: The security domain used to fetch registry entries in the keychain.
     ///   - accessGroup: If present, the access group used to fetch registry entries in the keychain.
-    public init(securityDomain: String, accessGroup: String? = nil) {
+    ///   - trustedApplicationPaths: Array of paths to applications that should have access to keychain items. Defaults to empty array.
+    public init(securityDomain: String, accessGroup: String? = nil, trustedApplicationPaths: [String] = []) {
         self.securityDomain = securityDomain
         self.accessGroup = accessGroup
+        self.trustedApplicationPaths = trustedApplicationPaths
     }
 
     /// Lookup authentication data for a given registry hostname.
@@ -93,7 +96,8 @@ public struct KeychainHelper: Sendable {
             accessGroup: self.accessGroup,
             hostname: hostname,
             username: username,
-            password: password
+            password: password,
+            trustedApplicationPaths: self.trustedApplicationPaths
         )
     }
 
