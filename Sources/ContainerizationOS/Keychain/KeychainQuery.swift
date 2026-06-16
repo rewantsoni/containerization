@@ -55,6 +55,10 @@ public struct KeychainQuery {
         guard let passwordEncoded = password.data(using: String.Encoding.utf8) else {
             throw Self.Error.invalidPasswordConversion
         }
+        
+        // Create access control to allow both container and container-core-images
+        let access = try createAccessControl()
+        
         var query: [String: Any] = [
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrSecurityDomain as String: securityDomain,
@@ -63,6 +67,7 @@ public struct KeychainQuery {
             kSecValueData as String: passwordEncoded,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
             kSecAttrSynchronizable as String: false,
+            kSecAttrAccess as String: access,
         ]
         if let accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
@@ -230,6 +235,19 @@ public struct KeychainQuery {
         }
         return true
     }
+    
+    /// Create access control that allows applications with the same code signing identity to access keychain items.
+    /// By passing nil as the trusted applications list, macOS will allow any application signed with the same
+    /// identity (e.g., com.apple.container.*) to access the keychain item without prompting the user.
+    private func createAccessControl() throws -> SecAccess {
+        var access: SecAccess?
+        // Passing nil for trustedApplications allows all apps with the same code signing identity
+        let status = SecAccessCreate("container registry credentials" as CFString, nil, &access)
+        guard status == errSecSuccess, let access = access else {
+            throw Self.Error.accessControlCreationFailed(status: status)
+        }
+        return access
+    }
 }
 
 extension KeychainQuery {
@@ -238,6 +256,7 @@ extension KeychainQuery {
         case unexpectedDataFetched
         case keyNotPresent(key: String)
         case invalidPasswordConversion
+        case accessControlCreationFailed(status: Int32)
     }
 }
 #endif
